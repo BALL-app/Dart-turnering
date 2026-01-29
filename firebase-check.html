@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Firebase-check (Dart-turnering)</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; background:#f3f5f7; color:#111}
+    header{background:#2f6fb2; color:#fff; padding:14px 16px}
+    header .small{opacity:.9; font-size:13px}
+    main{max-width:900px; margin:0 auto; padding:16px}
+    .card{background:#fff; border-radius:14px; padding:14px; box-shadow:0 6px 18px rgba(0,0,0,.08); margin-bottom:12px}
+    .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center}
+    button{border:0; border-radius:12px; padding:10px 12px; cursor:pointer; font-weight:600}
+    .primary{background:#1f9d55; color:#fff}
+    .secondary{background:#e9eef5; color:#0b2a4a}
+    .danger{background:#d64545; color:#fff}
+    input{padding:10px 12px; border-radius:12px; border:1px solid #ccd6e2; min-width:240px}
+    code{background:#f1f3f6; padding:2px 6px; border-radius:8px}
+    pre{background:#0b1220; color:#e6edf3; padding:12px; border-radius:12px; overflow:auto}
+    .ok{color:#137a2a; font-weight:700}
+    .bad{color:#b42318; font-weight:700}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .small{font-size:13px; color:#334}
+  </style>
+</head>
+<body>
+<header>
+  <div style="font-size:18px; font-weight:800">Firebase-check (snabbtest)</div>
+  <div class="small">firebase-check-v1 • Verifiera Auth + Firestore innan vi kopplar allt till turneringsflödet.</div>
+</header>
+
+<main>
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div>
+        <div style="font-weight:800">Status</div>
+        <div id="statusLine" class="small">Initierar…</div>
+      </div>
+      <div class="row">
+        <button class="secondary" id="btnClearSw">🔄 Rensa SW-cache</button>
+        <button class="danger" id="btnReload">↻ Ladda om</button>
+      </div>
+    </div>
+    <div class="small" style="margin-top:8px">
+      Tips: kör via https (GitHub Pages) eller http://localhost. Undvik content:// och file://.
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:800; margin-bottom:8px">1) Logga in (Anonymous)</div>
+    <div class="row">
+      <button class="primary" id="btnAnon">Logga in anonymt</button>
+      <button class="secondary" id="btnSignOut">Logga ut</button>
+    </div>
+    <div style="margin-top:10px">
+      UID: <span id="uid" class="mono">-</span> • Provider: <span id="provider" class="mono">-</span>
+    </div>
+
+    <div style="margin-top:10px" class="row">
+      <input id="displayName" placeholder="Ditt namn (profil)" />
+      <button class="primary" id="btnSaveProfile">Spara profil till Firestore</button>
+    </div>
+    <div class="small" style="margin-top:8px">
+      Förväntat: Authentication → Users får en “Anonymous”-rad. Firestore → users/{uid} skapas när du sparar profil.
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:800; margin-bottom:8px">2) Skapa / anslut online-turnering (minitest)</div>
+    <div class="row">
+      <input id="tName" placeholder="Turneringsnamn" />
+      <button class="primary" id="btnCreateT">Skapa turnering i Firestore</button>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <input id="joinCode" placeholder="Kod (6 tecken)" />
+      <button class="secondary" id="btnJoin">Anslut med kod</button>
+      <button class="secondary" id="btnListMine">Lista mina turneringar</button>
+    </div>
+    <div style="margin-top:10px">
+      Senast skapad kod: <span id="lastCode" class="mono">-</span> • DocId: <span id="lastDoc" class="mono">-</span>
+    </div>
+    <div class="small" style="margin-top:8px">
+      Förväntat: Firestore → tournaments skapas med fält code/ownerUid/memberUids.
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="font-weight:800; margin-bottom:8px">Logg</div>
+    <pre id="log"></pre>
+  </div>
+</main>
+
+<script type="module">
+  const firebaseConfig = {
+    apiKey: "AIzaSyAE4zslKdFbgsjXVnWPzcc67OIbE8v1-X0",
+    authDomain: "dart-turnering.firebaseapp.com",
+    projectId: "dart-turnering",
+    storageBucket: "dart-turnering.firebasestorage.app",
+    messagingSenderId: "63007726766",
+    appId: "1:63007726766:web:e1ba313924b72b1dd0613f"
+  };
+
+  const $ = (id) => document.getElementById(id);
+  const logEl = $("log");
+  function log(...args) {
+    const line = args.map(a => typeof a === "string" ? a : JSON.stringify(a, null, 2)).join(" ");
+    logEl.textContent += line + "\n";
+    logEl.scrollTop = logEl.scrollHeight;
+    console.log(...args);
+  }
+  function setStatus(ok, msg) {
+    $("statusLine").innerHTML = (ok ? '<span class="ok">OK</span>' : '<span class="bad">FEL</span>') + " • " + msg;
+  }
+
+  $("btnReload").addEventListener("click", () => location.reload());
+  $("btnClearSw").addEventListener("click", async () => {
+    try {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const r of regs) await r.unregister();
+      const keys = await caches.keys();
+      await Promise.all(keys.map(k => caches.delete(k)));
+      log("Rensade service worker + cache.");
+      setStatus(true, "Rensade SW/cache. Ladda om sidan.");
+    } catch (e) {
+      log("Rensa SW/cache misslyckades:", e);
+      setStatus(false, "Kunde inte rensa SW/cache.");
+    }
+  });
+
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+  import { getAuth, onAuthStateChanged, signInAnonymously, signOut } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js";
+  import {
+    getFirestore, doc, setDoc, serverTimestamp,
+    collection, addDoc, updateDoc, arrayUnion,
+    query, where, getDocs
+  } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js";
+
+  let app, auth, db, user = null;
+
+  try {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    setStatus(true, "Firebase init OK.");
+    log("Firebase init OK.");
+  } catch (e) {
+    setStatus(false, "Firebase init misslyckades.");
+    log("Firebase init misslyckades:", e);
+  }
+
+  function refreshUserUI(u) {
+    if (!u) {
+      $("uid").textContent = "-";
+      $("provider").textContent = "-";
+      return;
+    }
+    $("uid").textContent = u.uid;
+    $("provider").textContent = (u.providerData?.[0]?.providerId) || "anonymous";
+  }
+
+  onAuthStateChanged(auth, (u) => {
+    user = u || null;
+    refreshUserUI(user);
+    if (user) {
+      log("Auth: inloggad", { uid: user.uid });
+      setStatus(true, "Inloggad (authStateChanged).");
+    } else {
+      log("Auth: utloggad");
+      setStatus(true, "Inte inloggad.");
+    }
+  });
+
+  $("btnAnon").addEventListener("click", async () => {
+    try {
+      const res = await signInAnonymously(auth);
+      log("signInAnonymously OK", { uid: res.user.uid });
+    } catch (e) {
+      log("signInAnonymously FEL:", e.code, e.message);
+      setStatus(false, "Anon login fel: " + (e.code || e.message));
+    }
+  });
+
+  $("btnSignOut").addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+      log("signOut OK");
+    } catch (e) {
+      log("signOut FEL:", e);
+    }
+  });
+
+  $("btnSaveProfile").addEventListener("click", async () => {
+    if (!user) return setStatus(false, "Logga in först.");
+    const name = $("displayName").value.trim();
+    if (!name) return setStatus(false, "Skriv ett namn först.");
+    try {
+      await setDoc(doc(db, "users", user.uid), {
+        name,
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp()
+      }, { merge: true });
+      log("Sparade users/" + user.uid, { name });
+      setStatus(true, "Profil sparad i Firestore (users/" + user.uid + ").");
+    } catch (e) {
+      log("Spara profil FEL:", e.code, e.message);
+      setStatus(false, "Spara profil fel: " + (e.code || e.message));
+    }
+  });
+
+  function genCode() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let s = "";
+    for (let i=0;i<6;i++) s += chars[Math.floor(Math.random()*chars.length)];
+    return s;
+  }
+
+  $("btnCreateT").addEventListener("click", async () => {
+    if (!user) return setStatus(false, "Logga in först.");
+    const name = $("tName").value.trim() || "Online-turnering";
+    const code = genCode();
+    try {
+      const ref = await addDoc(collection(db, "tournaments"), {
+        name,
+        code,
+        ownerUid: user.uid,
+        memberUids: [user.uid],
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      $("lastCode").textContent = code;
+      $("lastDoc").textContent = ref.id;
+      log("Skapade tournaments/" + ref.id, { code, name });
+      setStatus(true, "Turnering skapad i Firestore. Kod: " + code);
+    } catch (e) {
+      log("Skapa turnering FEL:", e.code, e.message);
+      setStatus(false, "Skapa turnering fel: " + (e.code || e.message));
+    }
+  });
+
+  $("btnJoin").addEventListener("click", async () => {
+    if (!user) return setStatus(false, "Logga in först.");
+    const code = $("joinCode").value.trim().toUpperCase();
+    if (!code) return setStatus(false, "Skriv en kod först.");
+    try {
+      const q = query(collection(db, "tournaments"), where("code", "==", code));
+      const snap = await getDocs(q);
+      if (snap.empty) {
+        setStatus(false, "Hittade ingen turnering med den koden.");
+        return;
+      }
+      const docSnap = snap.docs[0];
+      await updateDoc(doc(db, "tournaments", docSnap.id), {
+        memberUids: arrayUnion(user.uid),
+        updatedAt: serverTimestamp()
+      });
+      log("Anslöt till tournaments/" + docSnap.id, { code });
+      setStatus(true, "Ansluten med kod " + code + " (doc: " + docSnap.id + ")");
+    } catch (e) {
+      log("Join FEL:", e.code, e.message);
+      setStatus(false, "Join fel: " + (e.code || e.message));
+    }
+  });
+
+  $("btnListMine").addEventListener("click", async () => {
+    if (!user) return setStatus(false, "Logga in först.");
+    try {
+      const q = query(collection(db, "tournaments"), where("memberUids", "array-contains", user.uid));
+      const snap = await getDocs(q);
+      log("Mina turneringar (" + snap.size + "):");
+      snap.forEach(d => log(" -", { id: d.id, ...d.data() }));
+      setStatus(true, "Listade dina turneringar i loggen.");
+    } catch (e) {
+      log("Lista FEL:", e.code, e.message);
+      setStatus(false, "Lista fel: " + (e.code || e.message));
+    }
+  });
+</script>
+</body>
+</html>
