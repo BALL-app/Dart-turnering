@@ -1,16 +1,14 @@
-/* Dart-turnering PWA service worker (stable)
+/* Dart-turnering PWA service worker (v78)
    - Network-first för HTML (uppdateringar)
    - Cache-first för övrigt
-   - Stabil fallback för index.html
+   - Stabil index-fallback (cacheas under fast nyckel)
 */
 
-const BUILD = "v77";                 // <-- bumpa vid deploy
+const BUILD = "v78";
 const CACHE_NAME = `dart-turnering-${BUILD}`;
 
-// Rekommendation under aktiv utveckling:
-// Precacha INTE index.html och INTE online.js,
-// så slipper ni “fastnade” varianter.
-// Lägg bara stabila assets här.
+// Under aktiv utveckling: precacha bara stabila assets.
+// (Undvik index.html och online.js för att slippa "fastnade" versioner.)
 const CORE_ASSETS = [
   "./",
   "./manifest.webmanifest"
@@ -26,12 +24,12 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.map(k => (k === CACHE_NAME ? null : caches.delete(k))));
+    await Promise.all(keys.map((k) => (k === CACHE_NAME ? null : caches.delete(k))));
     await self.clients.claim();
   })());
 });
 
-function isHTML(req) {
+function isHTML(req){
   return req.mode === "navigate" ||
     (req.headers.get("accept") || "").includes("text/html");
 }
@@ -40,13 +38,13 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Cross-origin (Firebase/CDN etc) -> alltid nätet
+  // Cross-origin direkt till nätet (Firebase/CDN mm)
   if (url.origin !== self.location.origin) {
     event.respondWith(fetch(req));
     return;
   }
 
-  // HTML: network-first men cachea alltid under samma nyckel
+  // HTML: network-first, cachea alltid som ./index.html
   if (isHTML(req)) {
     event.respondWith((async () => {
       try {
