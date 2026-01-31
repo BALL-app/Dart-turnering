@@ -1,69 +1,80 @@
-// online.js (robust)
-// - Funkar även om knappar renderas om (event delegation)
-// - Kör Firebase om det finns, annars fallback till stub
-// - Inga antaganden om att knappar finns vid DOMContentLoaded
+// online.js (v78) – robust online-knappar
+// - Event delegation: funkar även om UI renderas om
+// - Kör Firebase-flöde om det finns, annars fallback till stub
+// - Visar tydliga fel om varken Firebase eller stub finns
 
-function safeAlert(msg) {
-  try { alert(msg); } catch (e) { console.log(msg); }
+function _safeAlert(msg){
+  try { alert(msg); } catch(e){ console.log(msg); }
 }
 
-function callIfFn(fn, fallbackMsg) {
-  try {
-    if (typeof fn === "function") return fn();
-    safeAlert(fallbackMsg);
-  } catch (e) {
+function _call(fn, fallbackMsg){
+  try{
+    if(typeof fn === "function") return fn();
+    _safeAlert(fallbackMsg);
+  }catch(e){
     console.error(e);
-    safeAlert("Ett fel inträffade. Se konsolen för detaljer.");
+    _safeAlert("Ett fel inträffade. Se konsolen för detaljer.");
   }
 }
 
-function createOnlineFlow() {
-  // 1) Firebase-path om den finns och är komplett
-  if (window.__FIREBASE?.enabled) {
-    if (typeof window.__FIREBASE.createTournament === "function") {
-      return callIfFn(() => window.__FIREBASE.createTournament(),
-        "Firebase är aktivt men createTournament() saknas.");
+function _explainFirebaseError(err){
+  const code = err && (err.code || err.name) ? String(err.code || err.name) : "";
+  const msg = err && (err.message || err.toString) ? String(err.message || err) : "Okänt fel";
+  // Vanliga Firebase-permissions
+  if(code.includes("permission") || msg.toLowerCase().includes("permission") || msg.toLowerCase().includes("insufficient permissions")){
+    return "Firebase blockerade åtgärden (rules/behörighet).\n\n" + msg;
+  }
+  return "Firebase-fel:\n\n" + msg;
+}
+
+async function _createOnlineFlow(){
+  // Loggar som bevis
+  console.log("[online] __FIREBASE =", window.__FIREBASE);
+  console.log("[online] createOnlineTournamentStub typeof =", typeof window.createOnlineTournamentStub);
+
+  // 1) Firebase-vägen om aktiv + funktion finns
+  if(window.__FIREBASE?.enabled && typeof window.__FIREBASE.createTournament === "function"){
+    try{
+      return await window.__FIREBASE.createTournament();
+    }catch(err){
+      console.error(err);
+      _safeAlert(_explainFirebaseError(err));
+      // Fallback efter Firebase-fel (så det inte känns "dött")
+      if(typeof window.createOnlineTournamentStub === "function"){
+        return _call(window.createOnlineTournamentStub, "Stubben kunde inte köras efter Firebase-fel.");
+      }
+      return;
     }
-    // Firebase enabled men saknar create -> fall back
-    // (detta är viktig: annars “händer ingenting”)
   }
 
-  // 2) Fallback till stub i index.html (som ni redan exponerar globalt)
-  if (typeof window.createOnlineTournamentStub === "function") {
-    return callIfFn(window.createOnlineTournamentStub,
-      "Stub för createOnlineTournamentStub() kunde inte köras.");
+  // 2) Fallback stub
+  if(typeof window.createOnlineTournamentStub === "function"){
+    return _call(window.createOnlineTournamentStub, "Stubben kunde inte köras.");
   }
 
   // 3) Sista skyddsnät
-  safeAlert("Online-funktionen är inte korrekt initierad (varken Firebase eller stub finns).");
+  _safeAlert("Varken Firebase eller stubben är initierad.\n\nDet tyder oftast på att ett JS-fel i index.html stoppade init innan export-raderna kördes.");
 }
 
-function joinOnlineFlow() {
-  if (typeof window.openJoinOnlineOverlay === "function") {
-    return callIfFn(window.openJoinOnlineOverlay,
-      "openJoinOnlineOverlay() kunde inte köras.");
+function _joinOnlineFlow(){
+  if(typeof window.openJoinOnlineOverlay === "function"){
+    return _call(window.openJoinOnlineOverlay, "openJoinOnlineOverlay() kunde inte köras.");
   }
-  safeAlert("Join-overlay saknas (openJoinOnlineOverlay finns inte).");
+  _safeAlert("Join-overlay saknas (openJoinOnlineOverlay finns inte).");
 }
 
-// Event delegation: överlever DOM-omrenderingar
+// Event delegation: fångar alltid klick oavsett om knappen byts ut
 document.addEventListener("click", (e) => {
   const createBtn = e.target?.closest?.("#btnCreateOnline");
-  if (createBtn) {
-    // Valfritt: förhindra dubbelhantering om ni också har onclick
-    // e.preventDefault();
-    // e.stopPropagation();
-    createOnlineFlow();
+  if(createBtn){
+    _createOnlineFlow();
     return;
   }
-
   const joinBtn = e.target?.closest?.("#btnJoinOnline");
-  if (joinBtn) {
-    // e.preventDefault();
-    // e.stopPropagation();
-    joinOnlineFlow();
+  if(joinBtn){
+    _joinOnlineFlow();
     return;
   }
-}, true); // capture=true gör att vi fångar även om andra handlers bråkar
+}, true);
 
-console.log("[online.js] loaded", { href: location.href, module: true });
+console.log("[online.js v78] loaded", { href: location.href, module: true });
