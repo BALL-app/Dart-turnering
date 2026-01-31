@@ -1,10 +1,10 @@
-/* Dart-turnering PWA service worker (v78)
+/* Dart-turnering PWA service worker (v79)
    - Network-first för HTML (uppdateringar)
    - Cache-first för övrigt
    - Stabil index-fallback (cacheas under fast nyckel)
 */
 
-const BUILD = "v78";
+const BUILD = "v79";
 const CACHE_NAME = `dart-turnering-${BUILD}`;
 
 // Under aktiv utveckling: precacha bara stabila assets.
@@ -38,13 +38,11 @@ self.addEventListener("fetch", (event) => {
   const req = event.request;
   const url = new URL(req.url);
 
-  // Cross-origin direkt till nätet (Firebase/CDN mm)
   if (url.origin !== self.location.origin) {
     event.respondWith(fetch(req));
     return;
   }
 
-  // HTML: network-first, cachea alltid som ./index.html
   if (isHTML(req)) {
     event.respondWith((async () => {
       try {
@@ -60,7 +58,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Övrigt: cache-first (utan ignoreSearch)
   event.respondWith((async () => {
     const cached = await caches.match(req);
     if (cached) return cached;
